@@ -41,15 +41,8 @@ textarea {
   gap: 18px;
   padding: 18px clamp(16px, 4vw, 42px);
   border-bottom: 1px solid rgba(25, 34, 49, 0.12);
-  background: rgba(244, 241, 234, 0.9);
+  background: rgba(255, 253, 248, 0.94);
   backdrop-filter: blur(14px);
-}
-
-.eyebrow {
-  margin: 0 0 4px;
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 800;
 }
 
 h1,
@@ -59,10 +52,6 @@ h3 {
   letter-spacing: 0;
 }
 
-h1 {
-  font-size: clamp(26px, 4vw, 44px);
-}
-
 h2 {
   margin-bottom: 16px;
   font-size: 22px;
@@ -70,19 +59,8 @@ h2 {
 
 .header-actions {
   display: flex;
+  flex-wrap: nowrap;
   gap: 10px;
-}
-
-.auth-panel {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin: 20px clamp(16px, 4vw, 42px) 0;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel);
-  box-shadow: 0 10px 28px rgba(25, 34, 49, 0.08);
 }
 
 .auth-copy {
@@ -109,11 +87,6 @@ h2 {
 .login-form input,
 .login-form button {
   min-height: 42px;
-}
-
-.auth-actions {
-  display: flex;
-  gap: 8px;
 }
 
 button,
@@ -144,6 +117,10 @@ button,
   padding: 24px clamp(16px, 4vw, 42px) 42px;
 }
 
+.layout.capture-collapsed {
+  grid-template-columns: minmax(180px, 230px) minmax(0, 1fr);
+}
+
 .mode-banner {
   grid-column: 1 / -1;
   padding: 13px 16px;
@@ -164,7 +141,56 @@ button,
 
 .capture-panel {
   align-self: start;
-  padding: 20px;
+  overflow: hidden;
+}
+
+.capture-summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 20px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 900;
+  list-style: none;
+}
+
+.capture-summary::-webkit-details-marker {
+  display: none;
+}
+
+.capture-summary::before {
+  content: "＋";
+  display: grid;
+  grid-row: 1 / 3;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--soft);
+  color: var(--accent);
+  font-size: 18px;
+}
+
+.capture-summary > span,
+.capture-summary > small {
+  grid-column: 2;
+}
+
+.capture-panel[open] .capture-summary::before {
+  content: "−";
+}
+
+.capture-summary small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.capture-panel-body {
+  padding: 0 20px 20px;
 }
 
 form,
@@ -982,7 +1008,7 @@ textarea:focus {
 }
 
 @media (max-width: 900px) {
-  .auth-panel {
+  .app-header {
     align-items: stretch;
     flex-direction: column;
   }
@@ -992,6 +1018,7 @@ textarea:focus {
   }
 
   .layout,
+  .layout.capture-collapsed,
   .toolbar,
   .detail-grid {
     grid-template-columns: 1fr;
@@ -1012,12 +1039,20 @@ textarea:focus {
   .field-row,
   .login-form {
     width: 100%;
+  }
+
+  .field-row,
+  .login-form {
     grid-template-columns: 1fr;
+  }
+
+  .header-actions {
+    overflow-x: auto;
   }
 
   .header-actions button,
   .header-actions .import-btn {
-    flex: 1;
+    flex: 1 0 auto;
     justify-content: center;
   }
 

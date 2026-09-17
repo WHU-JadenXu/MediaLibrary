@@ -8,21 +8,7 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <header class="app-header">
-      <div>
-        <p class="eyebrow">豆瓣采集 · iPhone / Mac 同步</p>
-        <h1>人生记录仪</h1>
-      </div>
-      <div class="header-actions">
-        <button id="exportBtn" type="button">导出</button>
-        <label class="import-btn">
-          导入
-          <input id="importInput" type="file" accept="application/json" />
-        </label>
-      </div>
-    </header>
-
-    <section class="auth-panel" aria-label="登录与云同步">
+    <header class="app-header" aria-label="登录与云同步">
       <div class="auth-copy">
         <strong id="cloudStatus">正在连接</strong>
         <span id="cloudHint">登录后即可在所有设备上同步记录。</span>
@@ -32,17 +18,27 @@
         <input id="passwordInput" type="password" autocomplete="current-password" placeholder="密码" required />
         <button id="loginBtn" class="primary" type="submit">登录</button>
       </form>
-      <div class="auth-actions">
+      <div class="header-actions">
+        <button id="exportBtn" type="button">导出</button>
+        <label class="import-btn">
+          导入
+          <input id="importInput" type="file" accept="application/json" />
+        </label>
         <button id="syncBtn" type="button" hidden>同步</button>
         <button id="logoutBtn" type="button" hidden>退出登录</button>
       </div>
-    </section>
+    </header>
 
     <main class="layout" id="appContent" hidden>
       <section class="mode-banner" id="modeBanner" hidden></section>
 
-      <section class="capture-panel" aria-label="添加记录">
-        <div class="douban-box compact">
+      <details class="capture-panel" id="capturePanel">
+        <summary class="capture-summary">
+          <span>添加记录</span>
+          <small>豆瓣采集与手动添加</small>
+        </summary>
+        <div class="capture-panel-body">
+          <div class="douban-box compact">
           <h2>豆瓣浏览器采集</h2>
           <a class="bookmarklet" id="doubanBookmarklet" href="#">豆瓣采集到记录库</a>
           <div class="hint">
@@ -50,9 +46,9 @@
           </div>
         </div>
 
-        <div class="manual-box">
-          <h2>手动添加</h2>
-          <form id="manualForm" class="lookup-form">
+          <div class="manual-box">
+            <h2>手动添加</h2>
+            <form id="manualForm" class="lookup-form">
           <label>
             作品名
             <input name="title" required placeholder="例如：漫长的季节 / 三体 / 置身事内" autocomplete="off" />
@@ -120,10 +116,11 @@
             <textarea name="notes" rows="4" placeholder="自己的评价、观看渠道、想法"></textarea>
           </label>
           <button class="primary" type="submit">添加记录</button>
-        </form>
-        <div class="results" id="lookupResults"></div>
+            </form>
+            <div class="results" id="lookupResults"></div>
+          </div>
         </div>
-      </section>
+      </details>
 
       <section class="library-panel" aria-label="记录列表">
         <div class="toolbar">

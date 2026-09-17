@@ -39,6 +39,8 @@ const loginBtn = document.querySelector("#loginBtn");
 const syncBtn = document.querySelector("#syncBtn");
 const logoutBtn = document.querySelector("#logoutBtn");
 const headerActions = document.querySelector(".header-actions");
+const layout = document.querySelector(".layout");
+const capturePanel = document.querySelector("#capturePanel");
 const isFileMode = window.location.protocol === "file:";
 const localKey = "media-library-preview";
 const config = window.MEDIA_LIBRARY_CONFIG || {};
@@ -92,6 +94,11 @@ const bookmarkletCode = `(() => {
     return node ? node.content.trim() : "";
   };
   const host = location.hostname;
+  const isDoubanHost = host === "douban.com" || host.endsWith(".douban.com");
+  if (!isDoubanHost || !/^\\/subject\\/\\d+\\/?/.test(location.pathname)) {
+    alert("采集无效：请先在当前标签页打开豆瓣的具体条目页，再点击这个书签。");
+    return;
+  }
   const type = host.includes("book.douban.com") ? "book" : host.includes("music.douban.com") ? "music" : "movie";
   const localDateKey = (date = new Date()) => {
     const year = date.getFullYear();
@@ -191,8 +198,12 @@ const bookmarkletCode = `(() => {
     alert("已识别到条目，但没有取到海报。请确认页面海报已经加载出来后再点书签。");
   }
   const data = btoa(unescape(encodeURIComponent(JSON.stringify(item))));
-  window.open("${appBaseUrl}?capture=" + encodeURIComponent(data), "_blank");
+  location.href = "${appBaseUrl}?capture=" + encodeURIComponent(data);
 })()`;
+
+function updateCaptureLayout() {
+  layout.classList.toggle("capture-collapsed", !capturePanel.open);
+}
 
 async function api(path, options = {}) {
   if (supabaseClient) return cloudApi(path, options);
@@ -1512,6 +1523,7 @@ async function load() {
       "当前是本地预览模式，数据只保存在这个浏览器中。";
   }
   doubanBookmarklet.href = `javascript:${encodeURIComponent(bookmarkletCode)}`;
+  updateCaptureLayout();
   initDatePicker(manualForm, manualDatePicker);
   initDatePicker(detailForm, detailDatePicker);
   updateDateFieldState(manualForm);
@@ -1527,6 +1539,7 @@ logoutBtn.addEventListener("click", signOut);
 syncBtn.addEventListener("click", () => {
   refreshCloudLibrary().catch((error) => setCloudState("同步失败", error.message));
 });
+capturePanel.addEventListener("toggle", updateCaptureLayout);
 
 manualForm.addEventListener("submit", async (event) => {
   event.preventDefault();
