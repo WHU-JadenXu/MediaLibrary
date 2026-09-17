@@ -80,6 +80,7 @@ let currentUser = null;
 let isCloudReady = false;
 let cloudLoadPromise = null;
 const datePickerStates = new Map();
+const posterUrlCache = new Map();
 const appBaseUrl = new URL(".", window.location.href).href;
 
 const bookmarkletCode = `(() => {
@@ -414,14 +415,98 @@ function compact(value, fallback = "未知") {
   return String(value || "").trim() || fallback;
 }
 
+function isDoubanImage(src) {
+  try {
+    const url = new URL(src, window.location.href);
+    return url.hostname === "doubanio.com" || url.hostname.endsWith(".doubanio.com");
+  } catch {
+    return false;
+  }
+}
+
 function displayImage(src) {
   if (!src) return "";
   try {
     const url = new URL(src, window.location.href);
+    if (isDoubanImage(url.href)) {
+      const fileName = url.pathname.split("/").filter(Boolean).pop();
+      if (fileName && /\.(?:jpe?g|png|webp)$/i.test(fileName)) {
+        return new URL(`./posters/${fileName}`, appBaseUrl).href;
+      }
+    }
     return url.href;
   } catch {
     return src;
   }
+}
+
+async function fetchProxiedPoster(src) {
+  if (!supabaseClient || !isDoubanImage(src)) return new URL(src, window.location.href).href;
+  if (!posterUrlCache.has(src)) {
+    const pending = (async () => {
+      const { data, error } = await supabaseClient.auth.getSession();
+      if (error || !data.session?.access_token) throw new Error("登录状态已失效，请重新登录。");
+
+      const endpoint = new URL("/functions/v1/douban-image", config.SUPABASE_URL);
+      endpoint.searchParams.set("url", src);
+      const response = await fetch(endpoint.href, {
+        headers: {
+          Authorization: `Bearer ${data.session.access_token}`,
+          apikey: config.SUPABASE_ANON_KEY
+        }
+      });
+      if (!response.ok) throw new Error(`海报代理请求失败：${response.status}`);
+      const blob = await response.blob();
+      if (!blob.type.startsWith("image/")) throw new Error("海报代理返回的不是图片。");
+      return URL.createObjectURL(blob);
+    })();
+    posterUrlCache.set(src, pending);
+    pending.catch(() => posterUrlCache.delete(src));
+  }
+  return posterUrlCache.get(src);
+}
+
+function setPosterImage(image, src, onError = null) {
+  const source = String(src || "").trim();
+  image.dataset.posterSource = source;
+  image.hidden = true;
+  if (!source) {
+    if (onError) onError();
+    return;
+  }
+
+  const applyUrl = (url, allowFallback) => {
+    if (image.dataset.posterSource !== source) return;
+    image.addEventListener("load", () => {
+      if (image.dataset.posterSource === source) image.hidden = false;
+    }, { once: true });
+    image.addEventListener("error", () => {
+      if (image.dataset.posterSource !== source) return;
+      if (allowFallback && isDoubanImage(source)) {
+        applyUrl(displayImage(source), false);
+        return;
+      }
+      image.hidden = true;
+      if (onError) onError();
+    }, { once: true });
+    image.src = url;
+  };
+
+  if (!isDoubanImage(source)) {
+    applyUrl(displayImage(source), false);
+    return;
+  }
+
+  fetchProxiedPoster(source)
+    .then((url) => applyUrl(url, true))
+    .catch(() => applyUrl(displayImage(source), false));
+}
+
+function clearPosterCache() {
+  for (const pending of posterUrlCache.values()) {
+    pending.then((url) => URL.revokeObjectURL(url)).catch(() => {});
+  }
+  posterUrlCache.clear();
 }
 
 function itemMeta(item) {
@@ -766,8 +851,7 @@ function renderCard(item) {
 
   const poster = item.poster || item.image;
   if (poster) {
-    image.src = displayImage(poster);
-    image.hidden = false;
+    setPosterImage(image, poster);
   }
 
   pill.textContent = `${typeLabels[item.type] || "记录"} · ${statusLabels[item.status] || ""}`;
@@ -895,9 +979,12 @@ function renderCalendar(items) {
       const poster = item.poster || item.image;
       if (poster) {
         const image = document.createElement("img");
-        image.src = displayImage(poster);
         image.alt = item.title;
         event.appendChild(image);
+        setPosterImage(image, poster, () => {
+          image.remove();
+          event.textContent = item.title.slice(0, 2);
+        });
       } else {
         event.textContent = item.title.slice(0, 2);
       }
@@ -927,12 +1014,21 @@ function renderCalendarSelection(entries) {
     row.className = "calendar-selection-item";
     const poster = item.poster || item.image;
     row.innerHTML = `
-      ${poster ? `<img src="${escapeHtml(displayImage(poster))}" alt="">` : `<span class="selection-placeholder">${escapeHtml(item.title.slice(0, 2))}</span>`}
+      ${poster ? `<img alt="">` : `<span class="selection-placeholder">${escapeHtml(item.title.slice(0, 2))}</span>`}
       <span>
         <b>${escapeHtml(item.title)}</b>
         <small>${escapeHtml(typeLabels[item.type] || "记录")} · ${escapeHtml(statusLabels[item.status] || "")}${item.rating ? ` · ${escapeHtml(`${item.rating}/10`)}` : ""}</small>
       </span>
     `;
+    const rowImage = row.querySelector("img");
+    if (rowImage) {
+      setPosterImage(rowImage, poster, () => {
+        const placeholder = document.createElement("span");
+        placeholder.className = "selection-placeholder";
+        placeholder.textContent = item.title.slice(0, 2);
+        rowImage.replaceWith(placeholder);
+      });
+    }
     row.addEventListener("click", () => openDetail(item.id, "calendar"));
     calendarSelection.appendChild(row);
   }
@@ -1181,8 +1277,7 @@ function fillDetailForm(item) {
   detailForm.elements.sourceUrl.value = item.sourceUrl || "";
   detailForm.elements.description.value = item.description || "";
   detailForm.elements.notes.value = item.notes || "";
-  detailPosterPreview.src = displayImage(item.poster || item.image || "");
-  detailPosterPreview.hidden = !(item.poster || item.image);
+  setPosterImage(detailPosterPreview, item.poster || item.image || "");
   setDatePickerSegments(detailForm, readDateSegments(item.dateSegments));
   updateDateFieldState(detailForm);
 }
@@ -1236,8 +1331,7 @@ function renderResults() {
     const addBtn = node.querySelector(".add-result");
 
     if (result.poster) {
-      image.src = displayImage(result.poster);
-      image.hidden = false;
+      setPosterImage(image, result.poster);
     }
 
     pill.textContent = `${typeLabels[result.type] || "记录"} · ${result.source}`;
@@ -1347,6 +1441,7 @@ async function signIn(email, password) {
 
 async function signOut() {
   if (supabaseClient) await supabaseClient.auth.signOut();
+  clearPosterCache();
   currentUser = null;
   isCloudReady = false;
   library = { items: [] };
@@ -1524,8 +1619,7 @@ tableWrap.addEventListener("pointerup", (event) => {
 searchInput.addEventListener("input", renderItems);
 
 detailForm.elements.poster.addEventListener("input", () => {
-  detailPosterPreview.src = displayImage(detailForm.elements.poster.value);
-  detailPosterPreview.hidden = !detailForm.elements.poster.value;
+  setPosterImage(detailPosterPreview, detailForm.elements.poster.value);
 });
 
 manualForm.elements.status.addEventListener("change", () => updateDateFieldState(manualForm));
