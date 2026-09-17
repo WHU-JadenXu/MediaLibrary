@@ -39,6 +39,7 @@ const loginBtn = document.querySelector("#loginBtn");
 const syncBtn = document.querySelector("#syncBtn");
 const logoutBtn = document.querySelector("#logoutBtn");
 const headerActions = document.querySelector(".header-actions");
+const appHeader = document.querySelector(".app-header");
 const layout = document.querySelector(".layout");
 const capturePanel = document.querySelector("#capturePanel");
 const isFileMode = window.location.protocol === "file:";
@@ -1400,6 +1401,7 @@ function formatAuthError(error) {
 }
 
 function updateAuthUi() {
+  appHeader.classList.toggle("login-mode", Boolean(supabaseClient) && !isCloudReady);
   loginForm.hidden = isCloudReady;
   logoutBtn.hidden = !isCloudReady;
   syncBtn.hidden = !isCloudReady;
@@ -1409,7 +1411,7 @@ function updateAuthUi() {
   if (isCloudReady) {
     setCloudState("云同步已开启", `${currentUser.email} · ${library.items.length} 条记录`);
   } else if (supabaseClient) {
-    setCloudState("请登录", "使用 FamilyBudget 相同的 Supabase 邮箱和密码登录。");
+    setCloudState("请登录", "");
   } else {
     setCloudState("本地模式", "未配置 Supabase，数据仅保存在当前浏览器中。");
   }

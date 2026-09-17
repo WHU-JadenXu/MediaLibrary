@@ -45,6 +45,46 @@ textarea {
   backdrop-filter: blur(14px);
 }
 
+.auth-shell {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  gap: 16px;
+}
+
+.app-header.login-mode {
+  min-height: 100vh;
+  min-height: 100svh;
+  flex-direction: column;
+  justify-content: center;
+  padding: 24px;
+  border-bottom: 0;
+  background:
+    radial-gradient(circle at top left, rgba(33, 107, 98, 0.12), transparent 36%),
+    radial-gradient(circle at bottom right, rgba(168, 85, 53, 0.1), transparent 34%),
+    var(--bg);
+}
+
+.login-mode .auth-shell {
+  display: grid;
+  width: min(100%, 420px);
+  flex: none;
+  gap: 24px;
+  padding: 34px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.login-mode .auth-copy {
+  text-align: center;
+}
+
+.login-mode .auth-copy strong {
+  font-size: 28px;
+}
+
 h1,
 h2,
 h3 {
@@ -78,6 +118,10 @@ h2 {
   font-size: 13px;
 }
 
+.auth-copy span:empty {
+  display: none;
+}
+
 .login-form {
   display: grid;
   grid-template-columns: minmax(180px, 240px) minmax(150px, 210px) auto;
@@ -87,6 +131,17 @@ h2 {
 .login-form input,
 .login-form button {
   min-height: 42px;
+}
+
+.login-mode .login-form {
+  width: 100%;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.login-mode .login-form input,
+.login-mode .login-form button {
+  min-height: 48px;
 }
 
 button,
@@ -1017,6 +1072,10 @@ textarea:focus {
 
   .login-form {
     grid-template-columns: 1fr 1fr auto;
+  }
+
+  .auth-shell {
+    width: 100%;
   }
 
   .layout,

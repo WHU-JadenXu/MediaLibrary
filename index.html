@@ -5,20 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="referrer" content="no-referrer" />
     <title>人生记录仪</title>
-    <link rel="stylesheet" href="./styles.css?v=20260917-vertical" />
+    <link rel="stylesheet" href="./styles.css?v=20260917-login" />
   </head>
   <body>
-    <header class="app-header" aria-label="登录与云同步">
-      <div class="auth-copy">
-        <strong id="cloudStatus">正在连接</strong>
-        <span id="cloudHint">登录后即可在所有设备上同步记录。</span>
+    <header class="app-header login-mode" aria-label="登录与云同步">
+      <div class="auth-shell">
+        <div class="auth-copy">
+          <strong id="cloudStatus">正在连接</strong>
+          <span id="cloudHint"></span>
+        </div>
+        <form id="loginForm" class="login-form">
+          <input id="emailInput" type="email" autocomplete="email" placeholder="邮箱" required />
+          <input id="passwordInput" type="password" autocomplete="current-password" placeholder="密码" required />
+          <button id="loginBtn" class="primary" type="submit">登录</button>
+        </form>
       </div>
-      <form id="loginForm" class="login-form">
-        <input id="emailInput" type="email" autocomplete="email" placeholder="邮箱" required />
-        <input id="passwordInput" type="password" autocomplete="current-password" placeholder="密码" required />
-        <button id="loginBtn" class="primary" type="submit">登录</button>
-      </form>
-      <div class="header-actions">
+      <div class="header-actions" hidden>
         <button id="exportBtn" type="button">导出</button>
         <label class="import-btn">
           导入
@@ -330,6 +332,6 @@
 
     <script src="./config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="./app.js?v=20260917-vertical"></script>
+    <script src="./app.js?v=20260917-login"></script>
   </body>
 </html>
