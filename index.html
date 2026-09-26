@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="referrer" content="no-referrer" />
     <title>人生记录仪</title>
-    <link rel="stylesheet" href="./styles.css?v=20260917-login" />
+    <link rel="stylesheet" href="./styles.css?v=20260926-safety" />
   </head>
   <body>
     <header class="app-header login-mode" aria-label="登录与云同步">
@@ -26,6 +26,7 @@
           导入
           <input id="importInput" type="file" accept="application/json" />
         </label>
+        <button id="trashBtn" type="button">回收站</button>
         <button id="syncBtn" type="button" hidden>同步</button>
         <button id="logoutBtn" type="button" hidden>退出登录</button>
       </div>
@@ -73,7 +74,9 @@
               <select name="status">
                 <option value="done">已看/读完</option>
                 <option value="watching">进行中</option>
+                <option value="abandoned">弃坑</option>
                 <option value="planned">想读/待读</option>
+                <option value="pending">待确定</option>
               </select>
             </label>
             <label>
@@ -245,8 +248,10 @@
                   <label>
                     状态
                     <select name="status">
+                      <option value="pending">待确定</option>
                       <option value="done">已看/读完</option>
                       <option value="watching">进行中</option>
+                      <option value="abandoned">弃坑</option>
                       <option value="planned">想读/待读</option>
                     </select>
                   </label>
@@ -297,6 +302,34 @@
       </section>
     </main>
 
+    <dialog class="app-dialog" id="duplicateDialog">
+      <div class="dialog-head">
+        <div>
+          <h2>发现重复记录</h2>
+          <p id="duplicateMessage"></p>
+        </div>
+        <button id="closeDuplicateBtn" type="button" aria-label="关闭">关闭</button>
+      </div>
+      <div class="dialog-actions">
+        <button id="openDuplicateBtn" type="button">打开已有记录</button>
+        <button id="updateDuplicateBtn" class="primary" type="button">用新资料更新</button>
+      </div>
+      <p class="dialog-hint">更新只替换豆瓣资料，保留你的状态、评分、日期和备注。</p>
+    </dialog>
+
+    <dialog class="app-dialog trash-dialog" id="trashDialog">
+      <div class="dialog-head">
+        <div>
+          <h2>回收站</h2>
+          <p>删除的记录会保留在这里，可恢复或永久删除。</p>
+        </div>
+        <button id="closeTrashBtn" type="button" aria-label="关闭">关闭</button>
+      </div>
+      <div class="trash-list" id="trashList"></div>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
     <template id="resultTemplate">
       <article class="result-card">
         <img class="result-poster" alt="" hidden />
@@ -332,6 +365,6 @@
 
     <script src="./config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="./app.js?v=20260917-login"></script>
+    <script src="./app.js?v=20260926-safety"></script>
   </body>
 </html>

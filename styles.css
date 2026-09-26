@@ -156,6 +156,16 @@ button,
   font-weight: 800;
 }
 
+button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.danger {
+  border-color: rgba(168, 85, 53, 0.35);
+  color: var(--accent-2);
+}
+
 .import-btn {
   display: inline-flex;
   align-items: center;
@@ -591,7 +601,7 @@ textarea:focus {
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
   margin: 18px 0;
 }
@@ -1064,6 +1074,105 @@ textarea:focus {
   min-height: 46px;
 }
 
+.app-dialog {
+  width: min(92vw, 560px);
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.app-dialog::backdrop {
+  background: rgba(25, 34, 49, 0.48);
+  backdrop-filter: blur(3px);
+}
+
+.dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dialog-head h2 {
+  margin-bottom: 7px;
+}
+
+.dialog-head p,
+.dialog-hint {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.dialog-hint {
+  margin-top: 14px;
+  font-size: 13px;
+}
+
+.trash-dialog {
+  width: min(94vw, 720px);
+}
+
+.trash-list {
+  display: grid;
+  gap: 10px;
+  max-height: min(65vh, 620px);
+  margin-top: 18px;
+  overflow-y: auto;
+}
+
+.trash-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.trash-item b,
+.trash-item small {
+  display: block;
+}
+
+.trash-item small {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.trash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.toast {
+  position: fixed;
+  z-index: 1000;
+  right: 22px;
+  bottom: 22px;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 13px 16px;
+  border-radius: 9px;
+  background: #192231;
+  color: #fff;
+  box-shadow: var(--shadow);
+  font-weight: 800;
+  line-height: 1.45;
+}
+
 @media (max-width: 900px) {
   .app-header {
     align-items: stretch;
@@ -1119,6 +1228,10 @@ textarea:focus {
 
   .stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .trash-item {
+    grid-template-columns: 1fr;
   }
 
   .result-card {

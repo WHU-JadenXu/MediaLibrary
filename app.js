@@ -26,6 +26,16 @@ const filterButtons = document.querySelectorAll(".filters button");
 const viewButtons = document.querySelectorAll(".view-tabs button");
 const exportBtn = document.querySelector("#exportBtn");
 const importInput = document.querySelector("#importInput");
+const trashBtn = document.querySelector("#trashBtn");
+const trashDialog = document.querySelector("#trashDialog");
+const trashList = document.querySelector("#trashList");
+const closeTrashBtn = document.querySelector("#closeTrashBtn");
+const duplicateDialog = document.querySelector("#duplicateDialog");
+const duplicateMessage = document.querySelector("#duplicateMessage");
+const openDuplicateBtn = document.querySelector("#openDuplicateBtn");
+const updateDuplicateBtn = document.querySelector("#updateDuplicateBtn");
+const closeDuplicateBtn = document.querySelector("#closeDuplicateBtn");
+const toast = document.querySelector("#toast");
 const itemTemplate = document.querySelector("#itemTemplate");
 const resultTemplate = document.querySelector("#resultTemplate");
 const modeBanner = document.querySelector("#modeBanner");
@@ -64,8 +74,10 @@ const typeLabels = {
 };
 
 const statusLabels = {
+  pending: "待确定",
   done: "已完成",
   watching: "进行中",
+  abandoned: "弃坑",
   planned: "想读/待读"
 };
 
@@ -82,9 +94,17 @@ let sortState = { key: "date", direction: "desc" };
 let currentUser = null;
 let isCloudReady = false;
 let cloudLoadPromise = null;
+let pendingDuplicateCapture = null;
+let duplicateReturnView = "table";
+let toastTimer = null;
 const datePickerStates = new Map();
 const posterUrlCache = new Map();
 const appBaseUrl = new URL(".", window.location.href).href;
+const appWindowName = "life-recorder-library";
+
+// Give the record-library tab a stable target name so the Douban bookmarklet
+// can return to an already-open tab instead of creating a duplicate.
+window.name = appWindowName;
 
 const bookmarkletCode = `(() => {
   const q = (selector) => document.querySelector(selector);
@@ -100,19 +120,27 @@ const bookmarkletCode = `(() => {
     alert("采集无效：请先在当前标签页打开豆瓣的具体条目页，再点击这个书签。");
     return;
   }
-  const type = host.includes("book.douban.com") ? "book" : host.includes("music.douban.com") ? "music" : "movie";
-  const localDateKey = (date = new Date()) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return \`\${year}-\${month}-\${day}\`;
-  };
   const pageText = document.body ? document.body.innerText : "";
   const title = text(q('[property="v:itemreviewed"]')) || text(q("h1")) || meta("og:title") || document.title.replace(/\\s*\\(豆瓣\\).*$/, "");
   const year = (text(q(".year")).match(/\\d{4}/) || [])[0] || ((meta("og:title") + " " + pageText).match(/\\d{4}/) || [])[0] || "";
   const director = qa('[rel="v:directedBy"]').map(text).filter(Boolean).join(" / ");
   const cast = qa('[rel="v:starring"]').map(text).filter(Boolean).slice(0, 10);
   const genres = qa('[property="v:genre"]').map(text).filter(Boolean);
+  const infoText = text(q("#info"));
+  const genreText = genres.join(" ");
+  const schemaTypes = qa('script[type="application/ld+json"]')
+    .map((node) => node.textContent || "")
+    .join(" ");
+  const type = (() => {
+    if (host.includes("book.douban.com")) return "book";
+    if (host.includes("music.douban.com")) return "music";
+    if (/(真人秀|脱口秀|综艺)/.test(genreText + " " + infoText)) return "variety";
+    if (/动画/.test(genreText)) return "anime";
+    if (/(集数|首播|单集片长|季数)\\s*[:：]/.test(infoText) || /TVSeries|TVEpisode/.test(schemaTypes)) {
+      return "series";
+    }
+    return "movie";
+  })();
   const normalizeUrl = (value) => {
     if (!value) return "";
     try {
@@ -187,8 +215,11 @@ const bookmarkletCode = `(() => {
     genres,
     poster,
     description,
-    status: "done",
-    date: localDateKey(),
+    status: "pending",
+    date: "",
+    startDate: "",
+    endDate: "",
+    dateSegments: [],
     rating: 0
   };
   if (!item.title || item.title === "豆瓣") {
@@ -199,11 +230,150 @@ const bookmarkletCode = `(() => {
     alert("已识别到条目，但没有取到海报。请确认页面海报已经加载出来后再点书签。");
   }
   const data = btoa(unescape(encodeURIComponent(JSON.stringify(item))));
-  location.href = "${appBaseUrl}?capture=" + encodeURIComponent(data);
+  const captureUrl = "${appBaseUrl}?capture=" + encodeURIComponent(data);
+  const libraryWindow = window.open(captureUrl, "${appWindowName}");
+  if (libraryWindow) {
+    libraryWindow.focus();
+  } else {
+    location.href = captureUrl;
+  }
 })()`;
 
 function updateCaptureLayout() {
   layout.classList.toggle("capture-collapsed", !capturePanel.open);
+}
+
+function activeItems() {
+  return library.items.filter((item) => !item.deletedAt);
+}
+
+function trashedItems() {
+  return library.items.filter((item) => Boolean(item.deletedAt));
+}
+
+function showToast(message) {
+  clearTimeout(toastTimer);
+  toast.textContent = message;
+  toast.hidden = false;
+  toastTimer = setTimeout(() => {
+    toast.hidden = true;
+  }, 3200);
+}
+
+function openDialog(dialog) {
+  if (typeof dialog.showModal === "function") {
+    if (!dialog.open) dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+}
+
+function closeDialog(dialog) {
+  if (typeof dialog.close === "function" && dialog.open) dialog.close();
+  else dialog.removeAttribute("open");
+}
+
+function downloadableLibrary(items = library.items) {
+  return {
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    items
+  };
+}
+
+function downloadLibraryFile(payload, label) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  link.href = url;
+  link.download = `media-library-${label}-${timestamp}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function normalizeImportPayload(payload) {
+  if (!payload || !Array.isArray(payload.items)) {
+    throw new Error("导入文件格式不正确：缺少 items 数组。");
+  }
+  if (payload.items.length > 20000) {
+    throw new Error("导入记录超过 20000 条，请拆分后再导入。");
+  }
+
+  const ids = new Set();
+  const items = payload.items.map((source, index) => {
+    if (!source || typeof source !== "object" || Array.isArray(source)) {
+      throw new Error(`第 ${index + 1} 条记录格式不正确。`);
+    }
+    const item = { ...source };
+    item.id = item.id || crypto.randomUUID();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item.id)) {
+      throw new Error(`第 ${index + 1} 条记录的 ID 不正确。`);
+    }
+    if (ids.has(item.id)) throw new Error(`导入文件中存在重复 ID：${item.id}`);
+    ids.add(item.id);
+    return item;
+  });
+  return { version: Number(payload.version || 1), items };
+}
+
+function doubanSubjectId(item) {
+  const sourceIdMatch = String(item?.sourceId || "").match(/^douban(?:-browser)?:([0-9]+)$/i);
+  if (sourceIdMatch) return sourceIdMatch[1];
+  const urlMatch = String(item?.sourceUrl || "").match(/douban\.com\/subject\/([0-9]+)/i);
+  return urlMatch ? urlMatch[1] : "";
+}
+
+function findCaptureDuplicate(payload) {
+  const subjectId = doubanSubjectId(payload);
+  return library.items.find((item) => {
+    if (payload.sourceId && item.sourceId === payload.sourceId) return true;
+    return subjectId && doubanSubjectId(item) === subjectId;
+  });
+}
+
+function captureMetadata(payload) {
+  const fields = [
+    "sourceId",
+    "source",
+    "sourceUrl",
+    "type",
+    "title",
+    "subtitle",
+    "creator",
+    "director",
+    "cast",
+    "publisher",
+    "platform",
+    "year",
+    "genres",
+    "poster",
+    "image",
+    "description"
+  ];
+  const metadata = Object.fromEntries(
+    fields
+      .filter((field) => {
+        const value = payload[field];
+        if (Array.isArray(value)) return value.length > 0;
+        return value !== undefined && value !== null && String(value).trim() !== "";
+      })
+      .map((field) => [field, payload[field]])
+  );
+  if (payload.poster) metadata.image = payload.poster;
+  return metadata;
+}
+
+function showDuplicateDialog(existing, payload) {
+  pendingDuplicateCapture = { existingId: existing.id, payload };
+  duplicateReturnView = currentView === "detail" ? previousView : currentView;
+  const inTrash = Boolean(existing.deletedAt);
+  duplicateMessage.textContent = inTrash
+    ? `《${existing.title}》已经在回收站中。你可以恢复原记录，或恢复并更新豆瓣资料。`
+    : `《${existing.title}》已经在记录库中。请选择如何处理。`;
+  openDuplicateBtn.textContent = inTrash ? "恢复已有记录" : "打开已有记录";
+  updateDuplicateBtn.textContent = inTrash ? "恢复并更新资料" : "用新资料更新";
+  openDialog(duplicateDialog);
 }
 
 async function api(path, options = {}) {
@@ -288,18 +458,41 @@ async function cloudApi(path, options = {}) {
     return readCloudLibrary();
   }
 
-  if (path.startsWith("/api/items/") && method === "DELETE") {
-    const id = decodeURIComponent(path.replace("/api/items/", ""));
+  if (path.startsWith("/api/items/") && path.endsWith("/purge") && method === "DELETE") {
+    const id = decodeURIComponent(path.replace("/api/items/", "").replace(/\/purge$/, ""));
     const { error } = await supabaseClient.from(tableName).delete().eq("id", id);
     if (error) throw new Error(formatCloudError(error));
     return readCloudLibrary();
   }
 
+  if (path.startsWith("/api/items/") && method === "DELETE") {
+    const id = decodeURIComponent(path.replace("/api/items/", ""));
+    const existing = library.items.find((item) => item.id === id);
+    if (!existing) throw new Error("没有找到这条记录。");
+    const item = makeClientItem({ deletedAt: new Date().toISOString() }, existing);
+    const { error } = await supabaseClient
+      .from(tableName)
+      .update({ item, updated_at: item.updatedAt })
+      .eq("id", id);
+    if (error) throw new Error(formatCloudError(error));
+    return readCloudLibrary();
+  }
+
   if (path === "/api/import" && method === "POST") {
-    const payload = JSON.parse(options.body || "{}");
-    if (!Array.isArray(payload.items)) throw new Error("导入文件格式不正确。");
-    const { error: deleteError } = await supabaseClient.from(tableName).delete().neq("id", crypto.randomUUID());
-    if (deleteError) throw new Error(formatCloudError(deleteError));
+    const payload = normalizeImportPayload(JSON.parse(options.body || "{}"));
+    const { error: replaceError } = await supabaseClient.rpc("replace_media_library_items", {
+      imported_items: payload.items
+    });
+    if (!replaceError) return readCloudLibrary();
+
+    const rpcUnavailable =
+      replaceError.code === "PGRST202" ||
+      /replace_media_library_items|schema cache|function.*not found/i.test(replaceError.message || "");
+    if (!rpcUnavailable) throw new Error(formatCloudError(replaceError));
+
+    // Compatibility path for deployments that have not applied the latest SQL yet:
+    // write every imported row successfully before removing records absent from the file.
+    const importedIds = new Set(payload.items.map((item) => item.id));
     if (payload.items.length) {
       const rows = payload.items.map((source) => {
         const item = makeClientItem(source, source);
@@ -311,8 +504,16 @@ async function cloudApi(path, options = {}) {
           updated_at: item.updatedAt
         };
       });
-      const { error: insertError } = await supabaseClient.from(tableName).insert(rows);
+      const { error: insertError } = await supabaseClient.from(tableName).upsert(rows, { onConflict: "id" });
       if (insertError) throw new Error(formatCloudError(insertError));
+    }
+    const staleIds = library.items.map((item) => item.id).filter((id) => !importedIds.has(id));
+    for (let index = 0; index < staleIds.length; index += 100) {
+      const { error: deleteError } = await supabaseClient
+        .from(tableName)
+        .delete()
+        .in("id", staleIds.slice(index, index + 100));
+      if (deleteError) throw new Error(`新记录已写入，但清理旧记录失败：${formatCloudError(deleteError)}`);
     }
     return readCloudLibrary();
   }
@@ -380,10 +581,23 @@ async function localApi(path, options = {}) {
     return writeLocalLibrary(nextLibrary);
   }
 
+  if (path.startsWith("/api/items/") && path.endsWith("/purge") && options.method === "DELETE") {
+    const id = decodeURIComponent(path.replace("/api/items/", "").replace(/\/purge$/, ""));
+    const nextLibrary = readLocalLibrary();
+    nextLibrary.items = nextLibrary.items.filter((item) => item.id !== id);
+    return writeLocalLibrary(nextLibrary);
+  }
+
   if (path.startsWith("/api/items/") && options.method === "DELETE") {
     const id = decodeURIComponent(path.replace("/api/items/", ""));
     const nextLibrary = readLocalLibrary();
-    nextLibrary.items = nextLibrary.items.filter((item) => item.id !== id);
+    const index = nextLibrary.items.findIndex((item) => item.id === id);
+    if (index === -1) throw new Error("没有找到这条记录。");
+    nextLibrary.items[index] = {
+      ...nextLibrary.items[index],
+      deletedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
     return writeLocalLibrary(nextLibrary);
   }
 
@@ -402,10 +616,7 @@ async function localApi(path, options = {}) {
   }
 
   if (path === "/api/import" && options.method === "POST") {
-    const payload = JSON.parse(options.body || "{}");
-    if (!Array.isArray(payload.items)) {
-      throw new Error("导入文件格式不正确。");
-    }
+    const payload = normalizeImportPayload(JSON.parse(options.body || "{}"));
     return writeLocalLibrary({ items: payload.items });
   }
 
@@ -540,13 +751,17 @@ function primaryCreator(item) {
   return item.creator || item.director || "";
 }
 
+function isUndatedStatus(status) {
+  return status === "pending" || status === "planned";
+}
+
 function itemStartDate(item) {
-  if (item.status === "planned") return "";
+  if (isUndatedStatus(item.status)) return "";
   return item.startDate || item.date || item.endDate || "";
 }
 
 function itemEndDate(item) {
-  if (item.status === "planned") return "";
+  if (isUndatedStatus(item.status)) return "";
   if (item.status === "watching") return itemStartDate(item) ? todayKey() : "";
   return item.endDate || item.date || item.startDate || "";
 }
@@ -685,7 +900,7 @@ function segmentDates(segments) {
 }
 
 function itemCalendarSegments(item) {
-  if (item.status === "planned") return [];
+  if (isUndatedStatus(item.status)) return [];
   const explicitSegments = readDateSegments(item.dateSegments);
   if (explicitSegments.length) return explicitSegments;
   const start = itemStartDate(item);
@@ -741,6 +956,8 @@ function itemDateLabel(item) {
 function sortedItems(items) {
   const direction = sortState.direction === "asc" ? 1 : -1;
   return [...items].sort((left, right) => {
+    if (left.status === "pending" && right.status !== "pending") return -1;
+    if (left.status !== "pending" && right.status === "pending") return 1;
     if (left.status === "planned" && right.status !== "planned") return -1;
     if (left.status !== "planned" && right.status === "planned") return 1;
     const leftValue = sortValue(left, sortState.key);
@@ -762,7 +979,7 @@ function updateSortButtons() {
 
 function filteredItems() {
   const query = searchInput.value.trim().toLowerCase();
-  return library.items.filter((item) => {
+  return activeItems().filter((item) => {
     const matchesType = currentFilter === "all" || item.type === currentFilter;
     const matchesStatus = currentStatusFilter === "all" || item.status === currentStatusFilter;
     const haystack = [
@@ -786,16 +1003,21 @@ function filteredItems() {
 }
 
 function renderStats() {
-  const total = library.items.length;
-  const done = library.items.filter((item) => item.status === "done").length;
-  const planned = library.items.filter((item) => item.status === "planned").length;
-  const watching = library.items.filter((item) => item.status === "watching").length;
+  const visibleItems = activeItems();
+  const total = visibleItems.length;
+  const pending = visibleItems.filter((item) => item.status === "pending").length;
+  const done = visibleItems.filter((item) => item.status === "done").length;
+  const planned = visibleItems.filter((item) => item.status === "planned").length;
+  const watching = visibleItems.filter((item) => item.status === "watching").length;
+  const abandoned = visibleItems.filter((item) => item.status === "abandoned").length;
 
   statsEl.innerHTML = [
     ["all", "总记录", total],
+    ["pending", "待确定", pending],
     ["done", "已完成", done],
     ["planned", "想读/待读", planned],
-    ["watching", "正在", watching]
+    ["watching", "正在", watching],
+    ["abandoned", "弃坑", abandoned]
   ]
     .map(
       ([filter, label, value]) => `
@@ -890,9 +1112,17 @@ function renderCard(item) {
   }
 
   deleteBtn.addEventListener("click", async () => {
-    if (!confirm(`删除《${item.title}》？`)) return;
-    library = await api(`/api/items/${encodeURIComponent(item.id)}`, { method: "DELETE" });
-    render();
+    if (!confirm(`将《${item.title}》移入回收站？`)) return;
+    deleteBtn.disabled = true;
+    try {
+      library = await api(`/api/items/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+      render();
+      updateAuthUi();
+      showToast(`已将《${item.title}》移入回收站。`);
+    } catch (error) {
+      deleteBtn.disabled = false;
+      showToast(`删除失败：${error.message}`);
+    }
   });
 
   node.querySelector(".item-card").addEventListener("click", (event) => {
@@ -1118,7 +1348,7 @@ function renderDatePicker(form) {
   if (!picker) return;
   const state = getDatePickerState(form);
   const status = form.elements.status.value;
-  const disabled = status === "planned";
+  const disabled = isUndatedStatus(status);
   const year = state.cursor.getFullYear();
   const month = state.cursor.getMonth();
   const first = new Date(year, month, 1);
@@ -1171,7 +1401,7 @@ function renderDatePicker(form) {
 
   const sorted = sortSegments(state.segments);
   if (disabled) {
-    selected.innerHTML = '<p class="date-picker-note">想读/待读不会进入日历。</p>';
+    selected.innerHTML = `<p class="date-picker-note">${status === "pending" ? "待确定" : "想读/待读"}状态不会进入日历。</p>`;
     return;
   }
   if (!sorted.length) {
@@ -1222,7 +1452,7 @@ function initDatePicker(form, picker) {
 function normalizeDatesForStatus(payload) {
   const next = { ...payload };
   next.dateSegments = readDateSegments(next.dateSegments);
-  if (next.status === "planned") {
+  if (isUndatedStatus(next.status)) {
     next.startDate = "";
     next.endDate = "";
     next.date = "";
@@ -1243,7 +1473,7 @@ function normalizeDatesForStatus(payload) {
 function updateDateFieldState(form) {
   const status = form.elements.status?.value;
   const picker = form === manualForm ? manualDatePicker : detailDatePicker;
-  picker?.classList.toggle("disabled-picker", status === "planned");
+  picker?.classList.toggle("disabled-picker", isUndatedStatus(status));
   renderDatePicker(form);
 }
 
@@ -1261,7 +1491,7 @@ function switchView(view) {
 }
 
 function openDetail(id, fromView = currentView) {
-  const item = library.items.find((entry) => entry.id === id);
+  const item = activeItems().find((entry) => entry.id === id);
   if (!item) return;
   previousView = ["cards", "calendar"].includes(fromView) ? fromView : "table";
   selectedItemId = id;
@@ -1297,6 +1527,7 @@ function fillDetailForm(item) {
 async function saveDetail(event) {
   event.preventDefault();
   if (!selectedItemId) return;
+  const returnView = previousView;
   const formData = new FormData(detailForm);
   const payload = normalizeDatesForStatus({
     title: formData.get("title"),
@@ -1322,8 +1553,7 @@ async function saveDetail(event) {
     method: "PUT",
     body: JSON.stringify(payload)
   });
-  const savedId = selectedItemId;
-  openDetail(savedId, previousView);
+  switchView(returnView);
 }
 
 function renderResults() {
@@ -1384,6 +1614,70 @@ async function addResult(result) {
 function render() {
   renderStats();
   renderItems();
+  const trashCount = trashedItems().length;
+  trashBtn.textContent = trashCount ? `回收站 (${trashCount})` : "回收站";
+  if (trashDialog.open) renderTrash();
+}
+
+function renderTrash() {
+  const items = trashedItems();
+  if (!items.length) {
+    trashList.innerHTML = '<div class="empty small">回收站是空的。</div>';
+    return;
+  }
+
+  trashList.innerHTML = items
+    .map((item) => {
+      const deletedDate = item.deletedAt ? new Date(item.deletedAt).toLocaleString("zh-CN") : "";
+      return `
+        <article class="trash-item">
+          <div>
+            <b>${escapeHtml(item.title || "未命名记录")}</b>
+            <small>${escapeHtml(typeLabels[item.type] || "记录")} · 删除于 ${escapeHtml(deletedDate)}</small>
+          </div>
+          <div class="trash-actions">
+            <button data-restore-id="${item.id}" type="button">恢复</button>
+            <button class="danger" data-purge-id="${item.id}" type="button">永久删除</button>
+          </div>
+        </article>`;
+    })
+    .join("");
+
+  trashList.querySelectorAll("[data-restore-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        const item = library.items.find((entry) => entry.id === button.dataset.restoreId);
+        library = await api(`/api/items/${encodeURIComponent(button.dataset.restoreId)}`, {
+          method: "PUT",
+          body: JSON.stringify({ deletedAt: "" })
+        });
+        render();
+        updateAuthUi();
+        showToast(`已恢复《${item?.title || "这条记录"}》。`);
+      } catch (error) {
+        button.disabled = false;
+        showToast(`恢复失败：${error.message}`);
+      }
+    });
+  });
+
+  trashList.querySelectorAll("[data-purge-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const item = library.items.find((entry) => entry.id === button.dataset.purgeId);
+      if (!confirm(`永久删除《${item?.title || "这条记录"}》？此操作无法恢复。`)) return;
+      button.disabled = true;
+      try {
+        library = await api(`/api/items/${encodeURIComponent(button.dataset.purgeId)}/purge`, { method: "DELETE" });
+        render();
+        updateAuthUi();
+        showToast(`已永久删除《${item?.title || "这条记录"}》。`);
+      } catch (error) {
+        button.disabled = false;
+        showToast(`永久删除失败：${error.message}`);
+      }
+    });
+  });
 }
 
 function setCloudState(title, hint) {
@@ -1409,7 +1703,7 @@ function updateAuthUi() {
   headerActions.hidden = Boolean(supabaseClient) && !isCloudReady;
 
   if (isCloudReady) {
-    setCloudState("云同步已开启", `${currentUser.email} · ${library.items.length} 条记录`);
+    setCloudState("云同步已开启", `${currentUser.email} · ${activeItems().length} 条记录`);
   } else if (supabaseClient) {
     setCloudState("请登录", "");
   } else {
@@ -1468,19 +1762,20 @@ async function importCaptureFromUrl() {
   if (!encoded || !isCloudReady) return;
   try {
     const payload = JSON.parse(decodeURIComponent(escape(atob(encoded))));
-    const duplicate = library.items.find((item) => item.sourceId && item.sourceId === payload.sourceId);
+    const duplicate = findCaptureDuplicate(payload);
     if (duplicate) {
-      lookupResults.innerHTML = `<div class="empty small">《${escapeHtml(duplicate.title)}》已经在记录库中。</div>`;
+      showDuplicateDialog(duplicate, payload);
     } else {
       library = await api("/api/items", { method: "POST", body: JSON.stringify(payload) });
-      lookupResults.innerHTML = `<div class="empty small">已从豆瓣加入《${escapeHtml(payload.title)}》。</div>`;
+      showToast(`已从豆瓣加入《${payload.title}》，状态为待确定。`);
       render();
     }
-    url.searchParams.delete("capture");
-    history.replaceState(null, "", url.href);
   } catch (error) {
     modeBanner.hidden = false;
     modeBanner.textContent = `豆瓣采集失败：${error.message}`;
+  } finally {
+    url.searchParams.delete("capture");
+    history.replaceState(null, "", url.href);
   }
 }
 
@@ -1645,6 +1940,61 @@ backToTableBtn.addEventListener("click", () => switchView("table"));
 backToCardsBtn.addEventListener("click", () => switchView("cards"));
 backToCalendarBtn.addEventListener("click", () => switchView("calendar"));
 
+trashBtn.addEventListener("click", () => {
+  renderTrash();
+  openDialog(trashDialog);
+});
+closeTrashBtn.addEventListener("click", () => closeDialog(trashDialog));
+closeDuplicateBtn.addEventListener("click", () => closeDialog(duplicateDialog));
+
+openDuplicateBtn.addEventListener("click", async () => {
+  if (!pendingDuplicateCapture) return;
+  const { existingId } = pendingDuplicateCapture;
+  const existing = library.items.find((item) => item.id === existingId);
+  openDuplicateBtn.disabled = true;
+  try {
+    if (existing?.deletedAt) {
+      library = await api(`/api/items/${encodeURIComponent(existingId)}`, {
+        method: "PUT",
+        body: JSON.stringify({ deletedAt: "" })
+      });
+      render();
+      updateAuthUi();
+      showToast(`已恢复《${existing.title}》。`);
+    }
+    closeDialog(duplicateDialog);
+    pendingDuplicateCapture = null;
+    openDetail(existingId, duplicateReturnView);
+  } catch (error) {
+    showToast(`处理重复记录失败：${error.message}`);
+  } finally {
+    openDuplicateBtn.disabled = false;
+  }
+});
+
+updateDuplicateBtn.addEventListener("click", async () => {
+  if (!pendingDuplicateCapture) return;
+  const { existingId, payload } = pendingDuplicateCapture;
+  const existing = library.items.find((item) => item.id === existingId);
+  updateDuplicateBtn.disabled = true;
+  try {
+    library = await api(`/api/items/${encodeURIComponent(existingId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ ...captureMetadata(payload), deletedAt: "" })
+    });
+    closeDialog(duplicateDialog);
+    pendingDuplicateCapture = null;
+    render();
+    updateAuthUi();
+    openDetail(existingId, duplicateReturnView);
+    showToast(`已更新《${existing?.title || payload.title}》的豆瓣资料。`);
+  } catch (error) {
+    showToast(`更新失败：${error.message}`);
+  } finally {
+    updateDuplicateBtn.disabled = false;
+  }
+});
+
 prevMonthBtn.addEventListener("click", () => {
   calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() - 1, 1);
   renderItems();
@@ -1658,31 +2008,52 @@ nextMonthBtn.addEventListener("click", () => {
 deleteDetailBtn.addEventListener("click", async () => {
   if (!selectedItemId) return;
   const item = library.items.find((entry) => entry.id === selectedItemId);
-  if (!confirm(`删除《${item?.title || "这条记录"}》？`)) return;
-  library = await api(`/api/items/${encodeURIComponent(selectedItemId)}`, { method: "DELETE" });
-  switchView(previousView);
+  if (!confirm(`将《${item?.title || "这条记录"}》移入回收站？`)) return;
+  deleteDetailBtn.disabled = true;
+  try {
+    library = await api(`/api/items/${encodeURIComponent(selectedItemId)}`, { method: "DELETE" });
+    switchView(previousView);
+    render();
+    updateAuthUi();
+    showToast(`已将《${item?.title || "这条记录"}》移入回收站。`);
+  } catch (error) {
+    showToast(`删除失败：${error.message}`);
+  } finally {
+    deleteDetailBtn.disabled = false;
+  }
 });
 
 exportBtn.addEventListener("click", () => {
-  const blob = new Blob([JSON.stringify(library, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `media-library-${todayKey()}.json`;
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadLibraryFile(downloadableLibrary(), "export");
 });
 
 importInput.addEventListener("change", async () => {
   const file = importInput.files[0];
   if (!file) return;
-  const text = await file.text();
-  library = await api("/api/import", {
-    method: "POST",
-    body: text
-  });
-  importInput.value = "";
-  render();
+  try {
+    if (file.size > 20 * 1024 * 1024) throw new Error("导入文件不能超过 20 MB。");
+    const payload = normalizeImportPayload(JSON.parse(await file.text()));
+    if (!confirm(`导入文件包含 ${payload.items.length} 条记录，将替换当前记录库。继续前会自动下载完整备份。`)) return;
+
+    const backup = downloadableLibrary();
+    try {
+      localStorage.setItem("media-library-last-auto-backup", JSON.stringify(backup));
+    } catch {
+      // The downloaded backup remains available if browser storage is full.
+    }
+    downloadLibraryFile(backup, "backup-before-import");
+    library = await api("/api/import", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    render();
+    updateAuthUi();
+    showToast(`导入完成，共 ${activeItems().length} 条有效记录。`);
+  } catch (error) {
+    showToast(`导入失败：${error.message}`);
+  } finally {
+    importInput.value = "";
+  }
 });
 
 load().catch((error) => {
